@@ -12,7 +12,7 @@
 
 **ZorgDeID** is a Python library that detects and anonymizes Dutch PII in both plain text and documents (`.pdf`, `.docx`, `.txt`). It combines:
 
-- **Custom Dutch regex recognizers** — hand-tuned patterns for Dutch identifiers (BSN, IBAN, Zorgpolis, licence plates, …)
+- **Custom Dutch regex recognizers** — hand-tuned patterns for Dutch identifiers (BSN, IBAN, Health Identifier, licence plates, …)
 - **spaCy Dutch NER** (`nl_core_news_lg`) — neural named-entity recognition for persons and locations
 - **Algorithmic validation** — elfproef for BSN, mod-97 for IBAN, Luhn for credit cards and IMEI
 - **Context-aware scoring** — sentence-bounded keyword windows boost or penalize confidence before anonymization decisions
@@ -25,7 +25,7 @@ Use cases: de-identifying patient records, anonymizing clinical notes, sanitizin
 
 | Feature | Detail |
 |---------|--------|
-| **19 entity types** | Full Dutch PII coverage — from BSN and Zorgpolis to GPS coordinates and IMEI |
+| **18 entity types** | Full Dutch PII coverage — from BSN and Health Identifier to GPS coordinates and IMEI |
 | **3 guard modes** | `anonymize` (realistic Dutch fakes) · `tag` (`[PERSON]`) · `i_tag` (`[PERSON_1]`) |
 | **Document support** | Reads `.pdf` (pypdf), `.docx` (python-docx), and `.txt` natively |
 | **PDF normalization** | Automatically repairs pypdf extraction artifacts (double spaces, word-per-line scattering) |
@@ -245,7 +245,7 @@ zorgdeid/
 │   ├── datetime.py       — DATE, TIME
 │   ├── device.py         — IP_ADDRESS, MAC_ADDRESS, IMEI
 │   ├── financial.py      — IBAN_CODE, CREDIT_CARD
-│   ├── identifier.py     — BSN, PASSPORT, ZORGPOLIS_NUMBER
+│   ├── identifier.py     — BSN, PASSPORT, HEALTH_IDENTIFIER
 │   ├── location.py       — ZIPCODE, GPS_COORDINATES
 │   ├── spacy_recognizer.py  — NER recognizer (PERSON, LOCATION)
 │   └── vehicle.py        — LICENCE_PLATE
@@ -284,7 +284,7 @@ The [examples/quickstart.ipynb](examples/quickstart.ipynb) notebook covers:
 
 - Text and document analysis
 - All three guard modes
-- Dutch healthcare identifiers (BSN, Zorgpolis)
+- Dutch healthcare identifiers (BSN, HEALTH_IDENTIFIER)
 - Custom patterns with anonymization pools
 - Entity filtering and score thresholds
 - Error handling for unsupported file formats
