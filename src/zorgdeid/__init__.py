@@ -50,7 +50,7 @@ from zorgdeid.processors.doc_processor import (
     guard as _guard_doc,
 )
 
-__version__ = "1.0.0"
+__version__ = "1.0.1"
 
 # ---------------------------------------------------------------------------
 # Public namespace objects
