@@ -1,0 +1,26 @@
+﻿Medisch Verslag: Cardiologie Overdracht
+
+
+Patiëntgegevens:
+
+
+Naam: Jan-Willem van den Berg
+Geslacht: Man
+Geboortedatum: 12-05-1978
+BSN: 138403980 
+Adres: Dorpsstraat 45, 3521 CA, Utrecht
+Telefoonnummer: +31 6 12345678
+
+
+E-mail: j.vandenberg78@gmail.com
+
+
+Klinische Notitie:
+Patiënt is op 10 maart 2026 opgenomen op de afdeling Spoedeisende Hulp wegens aanhoudende pijn op de borst. De patiënt verklaarde dat de klachten begonnen tijdens een fietstocht nabij het Vondelpark in Amsterdam.
+
+
+Tijdens het lichamelijk onderzoek vertoonde de patiënt een verhoogde bloeddruk. Er is een afspraak ingepland voor een vervolgonderzoek bij de specialist, Dr. Anisa Bakker. Voor de facturatie en administratieve afhandeling is het dossier gekoppeld aan IBAN: NL91 ABNA 0417 1643 00.
+
+
+Behandelplan:
+Patiënt dient rust te houden. Voor vragen kan contact worden opgenomen met de assistente via https://www.careons-clinic.nl/contact of via het directe interne IP-adres van de poli: 192.168.1.104.
