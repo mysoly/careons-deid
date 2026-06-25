@@ -18,9 +18,9 @@ jobs:
           python-version: "3.11"
       - name: Install dependencies
         run: |
-          pip install click
           pip install -e .
           pip install pytest
+          pip install click
           python -m spacy download nl_core_news_lg
       - name: Run tests
         run: pytest tests/test.py -v
