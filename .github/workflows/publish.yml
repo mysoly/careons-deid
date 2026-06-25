@@ -18,6 +18,7 @@ jobs:
           python-version: "3.11"
       - name: Install dependencies
         run: |
+          pip install click
           pip install -e .
           pip install pytest
           python -m spacy download nl_core_news_lg
