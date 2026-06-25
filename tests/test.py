@@ -12,20 +12,31 @@ Covers:
     - custom_pattern()— custom recognizer detection and anonymization
     - Config validation — unknown keys, bad score_threshold, bad mode
     - Error handling  — UnsupportedFormatError, FileNotFoundError
+    - OCR support     — image files and scanned PDF fallback (Section 8)
 """
 
+import io
 import os
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 import zorgdeid
 from zorgdeid import (
     ALL_NL_ENTITY_TYPES,
+    OcrNotAvailableError,
     UnsupportedFormatError,
     analyze,
     custom_pattern,
     guard,
 )
+
+_easyocr_available = False
+try:
+    import easyocr  # noqa: F401
+    _easyocr_available = True
+except Exception:
+    pass
 
 # ---------------------------------------------------------------------------
 # Sample data
@@ -357,3 +368,292 @@ def test_i_tag_mode_uses_raw_entity_label():
     result = guard.text(IBAN_TEXT, config={"mode": "i_tag"})
     assert "[IBAN_CODE_1]" in result["guarded_text"]
     assert "[FINANCIAL_1]" not in result["guarded_text"]
+
+
+# ===========================================================================
+# 8 — OCR support
+# ===========================================================================
+
+# ---------------------------------------------------------------------------
+# 8a  Module-level constants and exports
+# ---------------------------------------------------------------------------
+
+def test_ocr_not_available_error_importable():
+    """OcrNotAvailableError must be part of the public API."""
+    assert OcrNotAvailableError is not None
+    assert issubclass(OcrNotAvailableError, ImportError)
+
+
+def test_image_extensions_supported():
+    """Image extensions must be listed in SUPPORTED_EXTENSIONS."""
+    from zorgdeid.processors.doc_processor import SUPPORTED_EXTENSIONS, IMAGE_EXTENSIONS
+    for ext in IMAGE_EXTENSIONS:
+        assert ext in SUPPORTED_EXTENSIONS
+
+
+def test_ocr_fallback_threshold_positive():
+    from zorgdeid.processors.doc_processor import OCR_FALLBACK_THRESHOLD
+    assert isinstance(OCR_FALLBACK_THRESHOLD, int)
+    assert OCR_FALLBACK_THRESHOLD > 0
+
+
+# ---------------------------------------------------------------------------
+# 8b  Error: unsupported format still raised for unknown extensions
+# ---------------------------------------------------------------------------
+
+def test_image_format_not_in_unsupported():
+    """A .png file should NOT raise UnsupportedFormatError anymore."""
+    with pytest.raises(FileNotFoundError):
+        analyze.doc("/nonexistent/path/scan.png")
+
+
+def test_unsupported_image_format_still_raises():
+    """Non-image formats like .gif still raise UnsupportedFormatError."""
+    with pytest.raises(UnsupportedFormatError):
+        analyze.doc("/nonexistent/path/scan.gif")
+
+
+# ---------------------------------------------------------------------------
+# 8c  OcrNotAvailableError raised when easyocr is not importable
+# ---------------------------------------------------------------------------
+
+def test_read_image_raises_ocr_not_available_when_no_easyocr(tmp_path):
+    """
+    _read_image → _get_easyocr_reader must raise OcrNotAvailableError when
+    easyocr is missing, not a bare ImportError.
+    """
+    from PIL import Image as PILImage
+    from zorgdeid.processors import doc_processor
+
+    img = PILImage.new("RGB", (100, 30), color=(255, 255, 255))
+    img_path = str(tmp_path / "test.png")
+    img.save(img_path)
+
+    # Reset the singleton so the import attempt runs fresh
+    original = doc_processor._easyocr_reader
+    doc_processor._easyocr_reader = None
+
+    import builtins
+    real_import = builtins.__import__
+
+    def mock_import(name, *args, **kwargs):
+        if name == "easyocr":
+            raise ImportError("mocked missing easyocr")
+        return real_import(name, *args, **kwargs)
+
+    try:
+        with patch("builtins.__import__", side_effect=mock_import):
+            with pytest.raises(OcrNotAvailableError):
+                doc_processor._read_image(img_path)
+    finally:
+        doc_processor._easyocr_reader = original
+
+
+def test_ocr_pdf_page_raises_ocr_not_available_when_no_fitz(tmp_path):
+    """
+    _ocr_pdf_page must raise OcrNotAvailableError when pymupdf (fitz) is missing.
+    """
+    from zorgdeid.processors import doc_processor
+
+    import builtins
+    real_import = builtins.__import__
+
+    def mock_import(name, *args, **kwargs):
+        if name == "fitz":
+            raise ImportError("mocked missing pymupdf")
+        return real_import(name, *args, **kwargs)
+
+    with patch("builtins.__import__", side_effect=mock_import):
+        with pytest.raises(OcrNotAvailableError):
+            doc_processor._ocr_pdf_page("dummy.pdf", 0)
+
+
+# ---------------------------------------------------------------------------
+# 8d  OCR pipeline unit tests via mocking (no model download required)
+# ---------------------------------------------------------------------------
+
+def test_ocr_image_calls_easyocr(tmp_path):
+    """
+    _ocr_image must call reader.readtext() and join the resulting lines.
+    """
+    from PIL import Image as PILImage
+    from zorgdeid.processors import doc_processor
+
+    img = PILImage.new("RGB", (200, 50), color=(255, 255, 255))
+
+    mock_reader = MagicMock()
+    mock_reader.readtext.return_value = ["BSN: 999999990"]
+
+    original = doc_processor._easyocr_reader
+    doc_processor._easyocr_reader = mock_reader
+
+    try:
+        result = doc_processor._ocr_image(img)
+    finally:
+        doc_processor._easyocr_reader = original
+
+    mock_reader.readtext.assert_called_once()
+    assert result == "BSN: 999999990"
+
+
+def test_ocr_image_joins_multiple_lines(tmp_path):
+    """
+    _ocr_image must join multiple text blocks returned by EasyOCR with newlines.
+    """
+    from PIL import Image as PILImage
+    from zorgdeid.processors import doc_processor
+
+    img = PILImage.new("RGB", (200, 100), color=(255, 255, 255))
+
+    mock_reader = MagicMock()
+    mock_reader.readtext.return_value = ["Naam: Jan de Vries", "BSN: 999999990"]
+
+    original = doc_processor._easyocr_reader
+    doc_processor._easyocr_reader = mock_reader
+
+    try:
+        result = doc_processor._ocr_image(img)
+    finally:
+        doc_processor._easyocr_reader = original
+
+    assert result == "Naam: Jan de Vries\nBSN: 999999990"
+
+
+def test_read_pdf_uses_ocr_fallback_for_sparse_pages():
+    """
+    _read_pdf must invoke OCR for pages that yield fewer than
+    OCR_FALLBACK_THRESHOLD characters.
+    """
+    from zorgdeid.processors.doc_processor import OCR_FALLBACK_THRESHOLD
+
+    mock_page_sparse = MagicMock()
+    mock_page_sparse.extract_text.return_value = ""  # image-only page
+
+    mock_page_rich = MagicMock()
+    mock_page_rich.extract_text.return_value = "A" * (OCR_FALLBACK_THRESHOLD + 10)
+
+    mock_reader_instance = MagicMock()
+    mock_reader_instance.pages = [mock_page_sparse, mock_page_rich]
+
+    with patch("zorgdeid.processors.doc_processor._ocr_pdf_page", return_value="OCR text") as mock_ocr, \
+         patch("pypdf.PdfReader", return_value=mock_reader_instance):
+        from zorgdeid.processors import doc_processor
+        doc_processor._read_pdf("dummy.pdf")
+
+    mock_ocr.assert_called_once_with("dummy.pdf", 0)
+    assert mock_page_sparse.extract_text.called
+
+
+def test_read_pdf_skips_ocr_for_rich_pages():
+    """
+    _read_pdf must NOT call OCR when pypdf returns sufficient text.
+    """
+    from zorgdeid.processors.doc_processor import OCR_FALLBACK_THRESHOLD
+
+    rich_text = "X" * (OCR_FALLBACK_THRESHOLD + 50)
+    mock_page = MagicMock()
+    mock_page.extract_text.return_value = rich_text
+
+    mock_reader_instance = MagicMock()
+    mock_reader_instance.pages = [mock_page]
+
+    with patch("zorgdeid.processors.doc_processor._ocr_pdf_page") as mock_ocr, \
+         patch("pypdf.PdfReader", return_value=mock_reader_instance):
+        from zorgdeid.processors import doc_processor
+        result = doc_processor._read_pdf("dummy.pdf")
+
+    mock_ocr.assert_not_called()
+    assert rich_text in result
+
+
+def test_read_image_converts_rgba_to_rgb(tmp_path):
+    """
+    _read_image must convert RGBA images to RGB before passing to EasyOCR.
+    """
+    from PIL import Image as PILImage
+    from zorgdeid.processors import doc_processor
+
+    rgba_img = PILImage.new("RGBA", (100, 30), color=(255, 255, 255, 128))
+    img_path = str(tmp_path / "rgba_test.png")
+    rgba_img.save(img_path)
+
+    captured = {}
+
+    def fake_ocr_image(img):
+        captured["mode"] = img.mode
+        return "test output"
+
+    with patch.object(doc_processor, "_ocr_image", side_effect=fake_ocr_image):
+        result = doc_processor._read_image(img_path)
+
+    assert captured["mode"] == "RGB"
+    assert result == "test output"
+
+
+def test_easyocr_singleton_initialised_once():
+    """
+    _get_easyocr_reader must initialise the reader only on the first call
+    and return the cached instance on subsequent calls.
+    """
+    from zorgdeid.processors import doc_processor
+
+    mock_reader = MagicMock()
+    mock_easyocr = MagicMock()
+    mock_easyocr.Reader.return_value = mock_reader
+
+    original = doc_processor._easyocr_reader
+    doc_processor._easyocr_reader = None
+
+    try:
+        with patch.dict("sys.modules", {"easyocr": mock_easyocr}):
+            r1 = doc_processor._get_easyocr_reader()
+            r2 = doc_processor._get_easyocr_reader()
+    finally:
+        doc_processor._easyocr_reader = original
+
+    mock_easyocr.Reader.assert_called_once_with(["nl"], gpu=False, verbose=False)
+    assert r1 is r2
+
+
+# ---------------------------------------------------------------------------
+# 8e  Full integration tests (skipped when easyocr is not installed)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.skipif(not _easyocr_available, reason="easyocr not installed")
+def test_ocr_integration_image_bsn(tmp_path):
+    """
+    End-to-end: render a white image with BSN text, run OCR, detect with
+    analyze.doc().  Requires easyocr (pip install zorgdeid[ocr]).
+    """
+    from PIL import Image as PILImage, ImageDraw
+
+    img = PILImage.new("RGB", (400, 60), color=(255, 255, 255))
+    draw = ImageDraw.Draw(img)
+    draw.text((10, 10), "BSN: 999999990", fill=(0, 0, 0))
+
+    img_path = str(tmp_path / "bsn_scan.png")
+    img.save(img_path)
+
+    results = analyze.doc(img_path)
+    assert isinstance(results, list)
+    # OCR quality on synthetic images varies; we verify the pipeline runs
+    # without error rather than guaranteeing detection on a minimal fixture.
+
+
+@pytest.mark.skipif(not _easyocr_available, reason="easyocr not installed")
+def test_ocr_integration_guard_image(tmp_path):
+    """
+    End-to-end: guard.doc() on a PNG image must return the expected shape.
+    """
+    from PIL import Image as PILImage, ImageDraw
+
+    img = PILImage.new("RGB", (400, 60), color=(255, 255, 255))
+    draw = ImageDraw.Draw(img)
+    draw.text((10, 10), "jan.devries@umcg.nl", fill=(0, 0, 0))
+
+    img_path = str(tmp_path / "email_scan.png")
+    img.save(img_path)
+
+    result = guard.doc(img_path)
+    _assert_guard_shape(result)
+    assert isinstance(result["guarded_text"], str)

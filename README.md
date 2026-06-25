@@ -10,7 +10,7 @@
 
 ## What is ZorgDeID?
 
-**ZorgDeID** is a Python library that detects and anonymizes Dutch PII in both plain text and documents (`.pdf`, `.docx`, `.txt`). It combines:
+**ZorgDeID** is a Python library that detects and anonymizes Dutch PII in plain text, documents (`.pdf`, `.docx`, `.txt`), and **scanned files** (`.jpg`, `.png`, `.tiff`, and image-based PDFs via OCR). It combines:
 
 - **Custom Dutch regex recognizers** — hand-tuned patterns for Dutch identifiers (BSN, IBAN, Health Identifier, licence plates, …)
 - **spaCy Dutch NER** (`nl_core_news_lg`) — neural named-entity recognition for persons and locations
@@ -28,7 +28,8 @@ Use cases: de-identifying patient records, anonymizing clinical notes, sanitizin
 | **18 entity types** | Full Dutch PII coverage — from BSN and Health Identifier to GPS coordinates and IMEI |
 | **3 guard modes** | `anonymize` (realistic Dutch fakes) · `tag` (`[PERSON]`) · `i_tag` (`[PERSON_1]`) |
 | **Document support** | Reads `.pdf` (pypdf), `.docx` (python-docx), and `.txt` natively |
-| **PDF normalization** | Automatically repairs pypdf extraction artifacts (double spaces, word-per-line scattering) |
+| **OCR support** | Scanned PDFs and image files (`.jpg`, `.png`, `.tiff`, `.bmp`, `.webp`) via EasyOCR — no system binary required |
+| **PDF normalization** | Automatically repairs pypdf extraction artifacts; falls back to OCR for image-only pages |
 | **Algorithmic validation** | BSN elfproef · IBAN mod-97 · Credit card & IMEI Luhn |
 | **Context-aware scoring** | Sentence-bounded keyword windows boost or penalize confidence scores |
 | **Vocabulary tiers** | Strong / weak keyword distinction — partial boosts for ambiguous context |
@@ -51,12 +52,15 @@ Download the Dutch spaCy model (required for `PERSON` and `LOCATION` detection):
 python -m spacy download nl_core_news_lg
 ```
 
-Document support requires optional dependencies:
+### Optional: OCR support
+
+To process **scanned PDFs and image files** (`.jpg`, `.png`, `.tiff`, `.bmp`, `.webp`):
 
 ```bash
-pip install pypdf          # PDF support
-pip install python-docx    # DOCX support
+pip install zorgdeid[ocr]
 ```
+
+This installs [EasyOCR](https://github.com/JaidedAI/EasyOCR) and [PyMuPDF](https://pymupdf.readthedocs.io/) — no system binaries (Tesseract, poppler) required. The Dutch neural model (~120 MB) is downloaded automatically on first use and cached in `~/.EasyOCR/`.
 
 ---
 
@@ -120,11 +124,34 @@ result = guard.doc("intake_form.docx", config={
 
 | Format | Reader | Notes |
 |--------|--------|-------|
-| `.txt` | built-in `open()` | UTF-8 |
-| `.pdf` | `pypdf` | All pages concatenated; spacing artifacts auto-normalized |
-| `.docx` | `python-docx` | All paragraphs joined |
+| `.txt` | built-in `open()` | UTF-8 with cp1252 fallback |
+| `.pdf` | `pypdf` | Digital PDFs extracted directly; image-only pages fall back to OCR automatically |
+| `.docx` | `python-docx` | All paragraphs and table cells joined |
+| `.jpg` `.jpeg` `.png` `.tiff` `.bmp` `.webp` | EasyOCR | Requires `pip install zorgdeid[ocr]` |
 
 Any other extension raises `UnsupportedFormatError` before the file-existence check.
+
+### OCR example
+
+```python
+from zorgdeid import analyze, guard
+from zorgdeid.processors.doc_processor import read as doc_read
+
+# Extract text via OCR
+text = doc_read("intake_scan.png")
+print(text)
+
+# Detect PII
+findings = analyze.doc("intake_scan.png")
+
+# Anonymize
+result = guard.doc("intake_scan.png", config={"mode": "tag"})
+print(result["guarded_text"])
+
+# Works identically for scanned PDFs
+result = guard.doc("patient_record_scan.pdf", config={"mode": "anonymize"})
+print(result["guarded_text"])
+```
 
 ---
 
@@ -251,7 +278,7 @@ zorgdeid/
 │   └── vehicle.py        — LICENCE_PLATE
 ├── processors/
 │   ├── text_processor.py — analyze / guard pipelines for plain-text input
-│   └── doc_processor.py  — file reading (.pdf / .docx / .txt) + normalization
+│   └── doc_processor.py  — file reading (.pdf / .docx / .txt / images) + OCR fallback
 ├── config/
 │   ├── entities.py       — ALL_NL_ENTITY_TYPES list
 │   └── scoring.py        — EntityScoreProfile per entity type
@@ -288,6 +315,7 @@ The [examples/quickstart.ipynb](examples/quickstart.ipynb) notebook covers:
 - Custom patterns with anonymization pools
 - Entity filtering and score thresholds
 - Error handling for unsupported file formats
+- OCR on image files and scanned PDFs
 
 ---
 

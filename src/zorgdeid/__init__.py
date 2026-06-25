@@ -45,12 +45,13 @@ from typing import Any, Dict, List, Optional
 from zorgdeid.config.entities import ALL_NL_ENTITY_TYPES
 from zorgdeid.processors.text_processor import analyze as _analyze, guard as _guard
 from zorgdeid.processors.doc_processor import (
+    OcrNotAvailableError,
     UnsupportedFormatError,
     analyze as _analyze_doc,
     guard as _guard_doc,
 )
 
-__version__ = "1.0.1"
+__version__ = "1.1.0"
 
 # ---------------------------------------------------------------------------
 # Public namespace objects
@@ -115,5 +116,6 @@ __all__ = [
     "custom_pattern",
     "ALL_NL_ENTITY_TYPES",
     "UnsupportedFormatError",
+    "OcrNotAvailableError",
     "__version__",
 ]
