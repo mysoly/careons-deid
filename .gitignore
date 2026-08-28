@@ -6,3 +6,4 @@ dist/
 .venv/
 workspace/
 .pytest_cache/
+roadmap.md
